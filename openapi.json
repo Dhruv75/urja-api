@@ -1,0 +1,1769 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Urja Meter Ops API",
+    "version": "0.1.0",
+    "description": "A clean, read-only REST API in front of the legacy Urja Meter Ops portal. Data is served from a local MongoDB index that is rebuilt from the portal; consumption is read through a cache. When `meta.source` is `fixture` the data is synthetic demo data."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Local"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Meters"
+    },
+    {
+      "name": "Network"
+    },
+    {
+      "name": "Operations"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded"
+            ]
+          },
+          "version": {
+            "type": "string"
+          },
+          "uptimeSec": {
+            "type": "integer"
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "fixture",
+                  "portal"
+                ]
+              },
+              "ok": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "null unless `?deep=true` was requested"
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "state": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "mode",
+              "ok",
+              "detail",
+              "state"
+            ]
+          },
+          "index": {
+            "type": "object",
+            "properties": {
+              "sync": {
+                "$ref": "#/components/schemas/SyncStatus"
+              },
+              "ageSeconds": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "stale": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "sync",
+              "ageSeconds",
+              "stale"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "version",
+          "uptimeSec",
+          "source",
+          "index"
+        ]
+      },
+      "SyncStatus": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "never",
+              "running",
+              "ok",
+              "error"
+            ]
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastSuccessAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "durationMs": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "counts": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "startedAt",
+          "finishedAt",
+          "lastSuccessAt",
+          "durationMs",
+          "counts",
+          "error"
+        ]
+      },
+      "SyncResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SyncStatus"
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "not_found"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "MeterList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Meter"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/Page"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/IndexMeta"
+          }
+        },
+        "required": [
+          "data",
+          "page",
+          "meta"
+        ]
+      },
+      "Meter": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "MTR-000001"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "serialNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "Trimmed and lower-cased; \"unknown\" when the portal gives none",
+            "example": "active"
+          },
+          "location": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "lat": {
+                "type": "number"
+              },
+              "lon": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "lat",
+              "lon"
+            ]
+          },
+          "nodeId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Hierarchy node the meter hangs off; null when it cannot be placed"
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Every other field the portal exposes, verbatim"
+          },
+          "dataQuality": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Issue codes found while cleaning this record (see /data-quality)"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "serialNumber",
+          "type",
+          "status",
+          "location",
+          "nodeId",
+          "attributes",
+          "dataQuality"
+        ]
+      },
+      "Page": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "limit",
+          "offset",
+          "total"
+        ]
+      },
+      "IndexMeta": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "fixture",
+              "portal"
+            ],
+            "description": "`fixture` means SYNTHETIC demo data, never the real portal"
+          },
+          "syncedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the local index was last rebuilt from the portal"
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "True if the index is older than INDEX_TTL_SEC or the last sync failed"
+          }
+        },
+        "required": [
+          "source",
+          "syncedAt",
+          "stale"
+        ]
+      },
+      "NearbyResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NearbyMeter"
+            }
+          },
+          "query": {
+            "type": "object",
+            "properties": {
+              "lat": {
+                "type": "number"
+              },
+              "lon": {
+                "type": "number"
+              },
+              "radiusM": {
+                "type": "number"
+              },
+              "limit": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "lat",
+              "lon",
+              "radiusM",
+              "limit"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/IndexMeta"
+          }
+        },
+        "required": [
+          "data",
+          "query",
+          "meta"
+        ]
+      },
+      "NearbyMeter": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "MTR-000001"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "serialNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "Trimmed and lower-cased; \"unknown\" when the portal gives none",
+            "example": "active"
+          },
+          "location": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "lat": {
+                "type": "number"
+              },
+              "lon": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "lat",
+              "lon"
+            ]
+          },
+          "nodeId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Hierarchy node the meter hangs off; null when it cannot be placed"
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Every other field the portal exposes, verbatim"
+          },
+          "dataQuality": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Issue codes found while cleaning this record (see /data-quality)"
+          },
+          "distanceM": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "serialNumber",
+          "type",
+          "status",
+          "location",
+          "nodeId",
+          "attributes",
+          "dataQuality",
+          "distanceM"
+        ]
+      },
+      "MeterDetailResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MeterDetail"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/IndexMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
+      "MeterDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "MTR-000001"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "serialNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "Trimmed and lower-cased; \"unknown\" when the portal gives none",
+            "example": "active"
+          },
+          "location": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "lat": {
+                "type": "number"
+              },
+              "lon": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "lat",
+              "lon"
+            ]
+          },
+          "nodeId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Hierarchy node the meter hangs off; null when it cannot be placed"
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Every other field the portal exposes, verbatim"
+          },
+          "dataQuality": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Issue codes found while cleaning this record (see /data-quality)"
+          },
+          "hierarchyPath": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HierarchyRef"
+            }
+          },
+          "syncedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "serialNumber",
+          "type",
+          "status",
+          "location",
+          "nodeId",
+          "attributes",
+          "dataQuality",
+          "hierarchyPath",
+          "syncedAt"
+        ]
+      },
+      "HierarchyRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "level": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "level"
+        ]
+      },
+      "ConsumptionResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "meterId": {
+                "type": "string"
+              },
+              "unit": {
+                "type": "string",
+                "example": "kWh"
+              },
+              "interval": {
+                "type": "string",
+                "enum": [
+                  "raw",
+                  "hour",
+                  "day"
+                ]
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "points": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ConsumptionPoint"
+                }
+              },
+              "summary": {
+                "$ref": "#/components/schemas/ConsumptionSummary"
+              }
+            },
+            "required": [
+              "meterId",
+              "unit",
+              "interval",
+              "from",
+              "to",
+              "points",
+              "summary"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ConsumptionMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
+      "ConsumptionPoint": {
+        "type": "object",
+        "properties": {
+          "ts": {
+            "type": "string",
+            "description": "Start of the interval, UTC"
+          },
+          "value": {
+            "type": "number",
+            "description": "Energy in the interval (`unit`)"
+          },
+          "samples": {
+            "type": "integer",
+            "description": "Readings summed into this bucket. A bucket with fewer samples than its neighbours is partial (window edge, or today so far); do not read it as a drop in consumption."
+          }
+        },
+        "required": [
+          "ts",
+          "value",
+          "samples"
+        ]
+      },
+      "ConsumptionSummary": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "min": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "max": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "average": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "points": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "min",
+          "max",
+          "average",
+          "points"
+        ]
+      },
+      "ConsumptionMeta": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "fixture",
+              "portal"
+            ],
+            "description": "Where the data originates (`fixture` = SYNTHETIC demo data)"
+          },
+          "servedFrom": {
+            "type": "string",
+            "enum": [
+              "cache",
+              "live"
+            ],
+            "description": "`live`: fetched from the source during this request. `cache`: answered from MongoDB."
+          },
+          "fetchedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ageSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "True when the portal failed and an older cached answer is being served"
+          },
+          "cacheDecision": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "forced",
+              "not_cached",
+              "expired",
+              "range_not_covered"
+            ]
+          },
+          "droppedReadings": {
+            "type": "integer",
+            "description": "Portal rows that could not be parsed"
+          },
+          "warning": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "source",
+          "servedFrom",
+          "fetchedAt",
+          "ageSeconds",
+          "stale",
+          "cacheDecision",
+          "droppedReadings",
+          "warning"
+        ]
+      },
+      "HierarchyResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "roots": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TreeNode"
+                }
+              },
+              "unplacedMeters": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "roots",
+              "unplacedMeters"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/IndexMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
+      "TreeNode": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "level": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "depth": {
+            "type": "integer"
+          },
+          "directMeterCount": {
+            "type": "integer"
+          },
+          "meterCount": {
+            "type": "integer",
+            "description": "Meters in the whole subtree"
+          },
+          "childCount": {
+            "type": "integer"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TreeNode"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "level",
+          "depth",
+          "directMeterCount",
+          "meterCount",
+          "childCount",
+          "issues",
+          "children"
+        ]
+      },
+      "NodeDetailResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "level": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "depth": {
+                "type": "integer"
+              },
+              "directMeterCount": {
+                "type": "integer"
+              },
+              "meterCount": {
+                "type": "integer",
+                "description": "Meters in the whole subtree"
+              },
+              "childCount": {
+                "type": "integer"
+              },
+              "issues": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parentId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ancestors": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/HierarchyRef"
+                }
+              },
+              "children": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/NodeSummary"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "level",
+              "depth",
+              "directMeterCount",
+              "meterCount",
+              "childCount",
+              "issues",
+              "parentId",
+              "ancestors",
+              "children"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/IndexMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
+      "NodeSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "level": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "depth": {
+            "type": "integer"
+          },
+          "directMeterCount": {
+            "type": "integer"
+          },
+          "meterCount": {
+            "type": "integer",
+            "description": "Meters in the whole subtree"
+          },
+          "childCount": {
+            "type": "integer"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "level",
+          "depth",
+          "directMeterCount",
+          "meterCount",
+          "childCount",
+          "issues"
+        ]
+      },
+      "DataQualityResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DataIssue"
+            }
+          },
+          "summary": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Issue count per code (unfiltered)"
+          },
+          "page": {
+            "$ref": "#/components/schemas/Page"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/IndexMeta"
+          }
+        },
+        "required": [
+          "data",
+          "summary",
+          "page",
+          "meta"
+        ]
+      },
+      "DataIssue": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "meter",
+              "node"
+            ]
+          },
+          "refId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "example": "orphan_node"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "refId",
+          "code",
+          "message"
+        ]
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "summary": "Service, index and portal-session health",
+        "description": "Cheap by default (database + in-memory session state only). Add `?deep=true` to also exercise the portal login.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "Also log in to / ping the portal (generates portal traffic)"
+            },
+            "required": false,
+            "description": "Also log in to / ping the portal (generates portal traffic)",
+            "name": "deep",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Health report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sync": {
+      "post": {
+        "tags": [
+          "Operations"
+        ],
+        "summary": "Rebuild the local index from the portal",
+        "description": "Re-reads ALL meters and the hierarchy from the portal (read-only towards the portal) and swaps them into MongoDB. Concurrent calls share one run.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "Block until the sync finishes (200) instead of returning 202 immediately"
+            },
+            "required": false,
+            "description": "Block until the sync finishes (200) instead of returning 202 immediately",
+            "name": "wait",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Finished (`wait=true`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Started or already running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The legacy portal failed, rejected our login, or is not mapped yet (`portal_unavailable`, `portal_auth_failed`, `portal_not_mapped`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/meters": {
+      "get": {
+        "tags": [
+          "Meters"
+        ],
+        "summary": "List and filter meters",
+        "description": "Served from the local index. Besides the documented parameters, any `attr.<name>=<value>` query parameter filters on a portal attribute (repeat it for OR), e.g. `?attr.tariffCategory=commercial&attr.sanctionedLoadKw=10`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "description": "Case-insensitive substring of id, name or serial number"
+            },
+            "required": false,
+            "description": "Case-insensitive substring of id, name or serial number",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated, e.g. `active,fault`"
+            },
+            "required": false,
+            "description": "Comma-separated, e.g. `active,fault`",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated, e.g. `single-phase`"
+            },
+            "required": false,
+            "description": "Comma-separated, e.g. `single-phase`",
+            "name": "type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Only meters anywhere below this hierarchy node"
+            },
+            "required": false,
+            "description": "Only meters anywhere below this hierarchy node",
+            "name": "nodeId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "hasLocation",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "default": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "id",
+                "name",
+                "status"
+              ],
+              "default": "id"
+            },
+            "required": false,
+            "name": "sort",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of meters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeterList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters (`validation_error`, `range_too_large`, ...)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The local index has not been built yet (`index_not_ready`); retry after the `Retry-After` header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/meters/nearby": {
+      "get": {
+        "tags": [
+          "Meters"
+        ],
+        "summary": "Meters near a location",
+        "description": "Great-circle distance, nearest first. Meters without valid coordinates are never returned. The search box does not wrap the antimeridian.",
+        "parameters": [
+          {
+            "schema": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": -90,
+              "maximum": 90
+            },
+            "required": false,
+            "name": "lat",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": -180,
+              "maximum": 180
+            },
+            "required": false,
+            "name": "lon",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 50000,
+              "default": 1000
+            },
+            "required": false,
+            "name": "radiusM",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated"
+            },
+            "required": false,
+            "description": "Comma-separated",
+            "name": "status",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Nearest meters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NearbyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters (`validation_error`, `range_too_large`, ...)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The local index has not been built yet (`index_not_ready`); retry after the `Retry-After` header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/meters/{meterId}": {
+      "get": {
+        "tags": [
+          "Meters"
+        ],
+        "summary": "One meter, with its position in the network",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "MTR-000001"
+            },
+            "required": true,
+            "name": "meterId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The meter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeterDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown meter / node (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The local index has not been built yet (`index_not_ready`); retry after the `Retry-After` header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/meters/{meterId}/consumption": {
+      "get": {
+        "tags": [
+          "Meters"
+        ],
+        "summary": "Consumption time series",
+        "description": "Interval energy, read through a cache. `meta.servedFrom` says whether the answer was fetched live from the source or came from the cache, `meta.ageSeconds` how old it is, and `meta.stale` whether it is out of date because the source failed. Windows touching \"now\" are trusted for 5 min, closed past windows for 24 h (configurable); `refresh=true` always asks the portal.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "MTR-000001"
+            },
+            "required": true,
+            "name": "meterId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "ISO-8601 instant or date (no offset = UTC). Default: `to` minus 7 days",
+              "example": "2026-10-01"
+            },
+            "required": false,
+            "description": "ISO-8601 instant or date (no offset = UTC). Default: `to` minus 7 days",
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Exclusive end. Default: now",
+              "example": "2026-10-08T00:00:00Z"
+            },
+            "required": false,
+            "description": "Exclusive end. Default: now",
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "raw",
+                "hour",
+                "day"
+              ],
+              "default": "hour",
+              "description": "Aggregation bucket (UTC)"
+            },
+            "required": false,
+            "description": "Aggregation bucket (UTC)",
+            "name": "interval",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "description": "Bypass the cache and ask the portal"
+            },
+            "required": false,
+            "description": "Bypass the cache and ask the portal",
+            "name": "refresh",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Time series",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsumptionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters (`validation_error`, `range_too_large`, ...)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown meter / node (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The legacy portal failed, rejected our login, or is not mapped yet (`portal_unavailable`, `portal_auth_failed`, `portal_not_mapped`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/hierarchy": {
+      "get": {
+        "tags": [
+          "Network"
+        ],
+        "summary": "The network hierarchy as a tree",
+        "description": "Rebuilt from the portal's parent references. Inconsistent data (orphans, cycles, duplicates) is repaired deterministically and reported; see `/data-quality`. Orphans and cycle-breakers appear as extra roots.",
+        "parameters": [
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 20,
+              "description": "Levels below the roots to include; omit for the whole tree"
+            },
+            "required": false,
+            "description": "Levels below the roots to include; omit for the whole tree",
+            "name": "depth",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tree",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HierarchyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters (`validation_error`, `range_too_large`, ...)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The local index has not been built yet (`index_not_ready`); retry after the `Retry-After` header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/hierarchy/{nodeId}": {
+      "get": {
+        "tags": [
+          "Network"
+        ],
+        "summary": "One hierarchy node with ancestors and children",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "FD-11"
+            },
+            "required": true,
+            "name": "nodeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The node",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown meter / node (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The local index has not been built yet (`index_not_ready`); retry after the `Retry-After` header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data-quality": {
+      "get": {
+        "tags": [
+          "Network"
+        ],
+        "summary": "Inconsistencies found in the portal data",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "meter",
+                "node"
+              ]
+            },
+            "required": false,
+            "name": "kind",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "default": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Issues",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataQualityResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters (`validation_error`, `range_too_large`, ...)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The local index has not been built yet (`index_not_ready`); retry after the `Retry-After` header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {}
+}

@@ -1,0 +1,18 @@
+{
+  "name": "urja-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Clean, documented, read-only API (and web client) over the legacy Urja Meter Ops portal. MERN: MongoDB, Express, React, Node.",
+  "engines": { "node": ">=20.19.0" },
+  "scripts": {
+    "install:all": "npm --prefix server ci && npm --prefix client ci",
+    "mongo": "docker compose up -d mongo",
+    "build": "npm --prefix client run build",
+    "start": "npm --prefix server start",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "test": "npm --prefix server test && npm --prefix client test",
+    "openapi": "npm --prefix server run openapi",
+    "explore": "npm --prefix server run explore"
+  }
+}

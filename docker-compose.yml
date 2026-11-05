@@ -1,0 +1,15 @@
+# Just the database. The API and the web client run with npm (see README); this keeps the setup to one command.
+services:
+  mongo:
+    image: mongo:7
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  mongo-data: {}
